@@ -1,0 +1,15 @@
+input.txt/ input.txt2 (Normal case)
+
+Testing errors in mm_read:
+input3.txt (Premature end to file)
+input4.txt (Empty file)
+input5.txt (Dimesion error, only one dimesion provided)
+input6.txt (Read error, one line did not contain float value)
+
+Testing mm_matrix_mult:
+input2.txt x input.txt(input2.txt rows = 4, input.txt cols = 4)
+
+Testing mm_alloc:
+input7.txt(negative dimension)
+
+

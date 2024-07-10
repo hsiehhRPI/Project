@@ -1,0 +1,13 @@
+C0001 Jane_Doe
+Pending: T1001(1)
+
+C0008 John_Snow
+Rental: T2001(1)
+
+C0009 Snoop_Dawg
+Rental: T1001(2)
+
+C0010 Yogi_Berra
+Rental: T2001(1)
+
+C0012 Ahmed_Smith

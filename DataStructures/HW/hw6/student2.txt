@@ -1,0 +1,11 @@
+5 5
+
++ james
++ verse
++ stare
++ onvel
++ magic
+
+- at
+- are
+- as

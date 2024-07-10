@@ -1,0 +1,309 @@
+module CPU(input clock);
+   
+   parameter Add = 4'b0000,
+            Subt = 4'b0001, 
+            And = 4'b0010,
+            Or = 4'b0011,
+            Not = 4'b0100, 
+            Halt = 4'b0101, 
+            Load = 4'b0110, 
+            Store = 4'b0111, 
+            Clear = 4'b1000, 
+            Skip = 4'b1001, 
+            Jump = 4'b1010, 
+            Jal = 4'b1011, 
+            Return = 4'b1100;
+
+   //variables
+   reg [1:0] state; //state program is in: fetch, decode, execute instructions
+   reg [31:0] PC;
+   reg [31:0] IR;
+   reg [3:0] opcode = 0000;
+   reg [27:0] MAR;
+   wire [31:0] AC = 8'h00000000;
+   reg [31:0] MBR;
+
+
+   //stuff for memory
+   reg [27:0] mem_addy;
+   reg [31:0] write_val; // the value used to write to mem
+   wire [31:0] read_val; 
+   reg Mem_RW;
+   reg Mem_done;
+   
+
+   //initial starting conditions
+   state = 0;
+   PC = -4; //since our first step will be adding 4 to PC in the loop, start at -4 to effectively start at PC = 0
+
+   //make the Control_Unit module
+   //Control_Unit CU(PC, IR, Memory, state); //we need to make sure this only runs on every clock cycle as well, right?
+   //make memory
+   Main_Memory Mem( mem_addy, mem_val, Mem_RW, Mem_done);
+
+   
+   //run program (loop: read line of code, put into IR, run on ALU, go to next line of code)
+   always @ (posedge clock) begin
+      case (state)
+         0: begin //fetch--read line of code and put into IR
+            if( opcode != Halt){
+               PC = PC + 4;
+            }
+            //IR = MEM[PC]
+            mem_addy = PC;
+            mem_RW = 1;
+            mem_done = 0;
+            #10; //wait a min to get the contents into the read value
+            mem_done = 1;
+            IR = read_val;
+            opcode = [31:28]IR;
+            if( opcode != Halt)
+               state = 1;
+         end
+         1: begin //decode--get opcode vs instruction
+            //finish all pre-ALU instructions here, now that we have the opcode
+            MAR = [27:0]IR; //MAR <- X
+            
+            //Dependability via Redundancy: even though it should be impossible for opcode to not match
+            //a command, check anyway and set opcode to halt if it doesn't match any commands
+            if (opcode != Add & opcode != Subt & opcode != And & opcode != Or & opcode != Not &
+               opcode != Load & opcode != Store & opcode != Clear & opcode != Skip & opcode != Jump &
+               opcode != Jal & opcode != Return & opcode != Halt)
+                  opcode = Halt;
+            
+            if (opcode == Add | opcode == Load | opcode == Subt | opcode == And | opcode == Or ) begin
+               //MBR <- M[MAR]
+               mem_addy = MAR;
+               mem_RW = 1; //read
+               mem_done = 0;//triggers the read in the memory module
+               #10;
+               mem_done = 1;//done reading
+               MBR = read_val;
+            end
+            
+            else if (opcode == Jump)
+               PC = IR[27:0] -4;
+               
+            else if ( opcode == Skip) begin
+               //skip C examines AC based on condition C and skips if condition is met
+               if (MAR == 0 & AC < 0)
+                  PC = PC + 4;
+               else if (MAR == 2 & AC = 0)
+                  PC = PC + 4;
+               else if (MAR == 4 & AC > 0)
+                  PC = PC + 4;
+            end
+            else if( opcode == JAL) begin
+               //MBR <- PC + 
+               MBR = PC + 4;
+               //M[MAR] <- MBR #stores value in MBR to address of MAR
+               mem_addy = MAR;
+               write_val = MBR;
+               mem_RW = 0; // write
+               mem_done = 0; //triggers the write
+               #10; //let the write happen
+               mem_done = 1;
+            end
+            else if (opcode == Return) begin
+               //MBR <- M[MAR]
+               mem_addy = MAR;
+               mem_RW = 1; // read
+               mem_done = 0; //triggers the read
+               #10; //let the read happen
+               mem_done = 1
+               MBR = read_val;
+               //MAR <- MBR
+               MAR = [31:4]MBR;
+               //MBR <- M[MAR]  # fetches the value at the address into MBR
+               mem_addy = MAR;
+               mem_RW = 1; // read
+               mem_done = 0; //triggers the read
+               #10; //let the read happen
+               mem_done = 1;
+               MBR = read_val;
+               //PC <- MBR
+               PC = MBR;
+            end
+            //once our pre-alu instructions are done, advance to the next state
+            state = 2;
+         end
+         2: begin //execute--send to ALU
+            #10 // giving the ALU time to do its things
+            state = 3; 
+         end
+         
+         3: begin 
+            //all post-ALU instructions go here
+            if (opcode == Store) begin
+               //MBR <- AC
+                MBR = AC;
+               //M[MAR] <- MBR
+               mem_addy = MAR;
+               write_val = MBR;
+               mem_RW = 0;//write to mem
+               mem_done = 0;//trigger write
+               #10;// wait for write to finish
+               mem_done = 1;
+            end   
+            else if( opcode == Jal)
+               PC = AC 
+            state = 0; //for now, go back to read next line of code, we'll need something to end it
+         end 
+
+      endcase
+   end
+      
+
+endmodule
+
+
+
+
+
+
+
+----------------------------------------------UPDATED CPU-------------------------------------------------------------------------------
+module CPU(input clock);
+   
+   parameter Add = 4'b0000,
+            Subt = 4'b0001, 
+            And = 4'b0010,
+            Or = 4'b0011,
+            Not = 4'b0100, 
+            Halt = 4'b0101, 
+            Load = 4'b0110, 
+            Store = 4'b0111, 
+            Clear = 4'b1000, 
+            Skip = 4'b1001, 
+            Jump = 4'b1010, 
+            Jal = 4'b1011, 
+            Return = 4'b1100;
+
+   //variables
+  //initial starting conditions
+   reg state = 0; //state program is in: fetch, decode, execute 
+   reg [31:0] PC = -4; //since our first step will be adding 4 to PC in the loop, start at -4 to effectively start at PC = 0
+   reg [31:0] IR;
+   reg [3:0] opcode = 0000;
+   reg [27:0] MAR;
+  wire [31:0] AC = 32'h00000000;
+   reg [31:0] MBR;
+
+
+   //stuff for memory
+   reg [27:0] mem_addy;
+   reg [31:0] write_val; // the value used to write to mem
+   wire [31:0] read_val; 
+   reg Mem_RW;
+   reg Mem_done;
+   
+   //make the Control_Unit module
+   //Control_Unit CU(PC, IR, Memory, state); //we need to make sure this only runs on every clock cycle as well, right?
+   //make memory
+  Main_Memory Mem( mem_addy, write_val, read_val, Mem_RW, Mem_done);
+
+   
+   //run program (loop: read line of code, put into IR, run on ALU, go to next line of code)
+   always @ (posedge clock) begin
+      case (state)
+         0: begin //fetch--read line of code and put into IR
+           if( opcode != Halt) begin
+              PC = PC + 4;
+            //IR = MEM[PC]
+              mem_addy = PC;
+            mem_RW = 1;
+            mem_done = 0;
+            #10; //wait a min to get the contents into the read value
+            mem_done = 1;
+            IR = read_val;
+            opcode = IR[31:28];
+            state = state + 1;
+           end
+         end
+         1: begin //decode--get opcode vs instruction
+            //finish all pre-ALU instructions here, now that we have the opcode
+            MAR = IR[27:0]; //MAR <- X
+            if (opcode == Add | opcode == Load | opcode == Subt | opcode == And | opcode == Or ) begin
+               //MBR <- M[MAR]
+               mem_addy = MAR;
+               mem_RW = 1; //read
+               mem_done = 0;//triggers the read in the memory module
+               #10;
+               mem_done = 1;//done reading
+               MBR = read_val;
+            end
+            else if (opcode == Jump)
+               PC = IR[27:0] -4;
+               
+            else if ( opcode == Skip) begin
+               //skip C examines AC based on condition C and skips if condition is met
+              if (MAR == 0 & AC < 0) begin
+                  PC = PC + 4;
+              end
+              else if (MAR == 2 & AC == 0) begin
+                  PC = PC + 4;
+              end
+              else if (MAR == 4 & AC > 0) begin
+                  PC = PC + 4;
+              end
+            end
+            else if( opcode == JAL) begin
+               //MBR <- PC + 
+               MBR = PC + 4;
+               //M[MAR] <- MBR #stores value in MBR to address of MAR
+               mem_addy = MAR;
+               write_val = MBR;
+               mem_RW = 0; // write
+               mem_done = 0; //triggers the write
+               #10; //let the write happen
+               mem_done = 1;
+            end
+            else if (opcode == Return) begin
+               //MBR <- M[MAR]
+               mem_addy = MAR;
+               mem_RW = 1; // read
+               mem_done = 0; //triggers the read
+               #10; //let the read happen
+               mem_done = 1;
+               MBR = read_val;
+               //MAR <- MBR
+               MAR = MBR[31:4];
+               //MBR <- M[MAR]  # fetches the value at the address into MBR
+               mem_addy = MAR;
+               mem_RW = 1; // read
+               mem_done = 0; //triggers the read
+               #10; //let the read happen
+               mem_done = 1;
+               MBR = read_val;
+               //PC <- MBR
+               PC = MBR;
+            end
+            //once our pre-alu instructions are done, advance to the next state
+            state = 2;
+         end
+         2: begin //execute--send to ALU
+            #10 // giving the ALU time to do its things
+            state = 3; 
+         end
+         
+         3: begin 
+            //all post-ALU instructions go here
+            if (opcode == Store) begin
+               //MBR <- AC
+                MBR = AC;
+               //M[MAR] <- MBR
+               mem_addy = MAR;
+               write_val = MBR;
+               mem_RW = 0;//write to mem
+               mem_done = 0;//trigger write
+               #10;// wait for write to finish
+               mem_done = 1;
+            end   
+            else if( opcode == Jal)
+               PC = AC;
+            state = 0; //for now, go back to read next line of code, we'll need something to end it
+         end 
+
+      endcase
+   end
+endmodule

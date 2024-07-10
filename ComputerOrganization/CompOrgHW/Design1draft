@@ -1,0 +1,87 @@
+// Code your design here
+module Design1(clock);
+  parameter load = 4'b0000,
+  			    store = 4'b0000,
+      			add = 4'b0001,
+      			subtract = 4'b0010,
+      			AND = 4'b0011,
+      			OR = 4'b0100,
+      			NOT = 4'b0101,
+      			halt = 4'b0110,
+      			clear = 4'b0111,
+      			skip = 4'b1000,
+      			jump = 4'b1001,
+      			jwl = 4'b1010,
+      			Return = 4'b1011;
+  input clock;
+  reg[31:0] PC, IR, ALU, MainMem[0:256];
+  reg[2:0] state;
+  wire [2:0] MAR, MBR, AC; //Register fields???
+  wire [3:0] opcode;
+  
+  //Assignments(Instruction format)
+  assign opcode = IR[31:26];
+  assign signExt = {{16{IR[15]}}, IR[15:0]};
+  assign offset = signExtend << 2;
+	//Program begining
+  initial begin
+    PC = 0;
+    state = 1;
+  end
+  always @(posedge clock) begin
+    AC = 0;
+    case (state)
+      1: begin	//Fetch instruction
+        IR <= MainMem[PC >> 2];
+        PC <= PC +4;
+        state = 2;
+      end
+      2: begin	//Decode
+        MAR = MainMem[IR[20:12]];
+        state = 3;
+        ALU <= PC + offset;
+      end
+      3:begin	//Instruction execution
+        state = 4;
+        if ((opcode == load)|(opcode == store)) 
+          AC <= A + signExt;
+        else if (opcode == add) begin
+          AC = AC + MAR;
+        end
+        else if (opcode == subtract) begin
+          AC = xor MAR;
+          AC = MAR + 1;
+          AC = AC + MAR;
+        end
+        else if (opcode == AND) begin
+          AC = AC && MAR;
+        end
+        else if (opcode == OR) begin
+          AC = AC || MAR;
+        end
+        else if (opcode == NOT) begin
+          AC = !AC;
+        end
+        else if (opcode == HALT) begin
+        end
+        else if (opcode == clear) begin
+        end
+        else if (opcode == skip) begin
+          PC = PC +4;
+        end
+        else if (opcode == jump) begin
+          PC = {PC, IR[20:18]};
+          state = 1;
+        end
+        else if (opcode == jwl) begin
+        end
+        else if (opcode == Return) begin
+        end
+        else;
+      end 
+      4: begin
+      end
+      5: begin
+      end
+    	endcase
+  end 

@@ -1,0 +1,25 @@
+8 solution(s)
+cat
+one
+
+cat
+eno
+
+tac
+one
+
+tac
+eno
+
+one
+cat
+
+eno
+cat
+
+one
+tac
+
+eno
+tac
+

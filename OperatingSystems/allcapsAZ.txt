@@ -1,0 +1,212 @@
+ABCDEFGHIJKLMNOPQRSTUVWXYZ
+
+
+int validPlace(char** board, int x, int y, int length) {
+	//Return values: -1 for not valid, returns the y coordinate of the valid placement
+	//We don't need to check the entire board, just the rows before
+	if (x == 0) {
+		return y;
+	}
+	//Checking the column
+	int mod = 1;
+	for (int i = 0; i < x; i = i + 1) {
+		if (*(*(board+i)+y) == 'Q') {
+			return -1;
+		}
+		if (x - mod >= 0 && y - mod >= 0) {
+			if (*(*(board+x-mod)+y-mod) == 'Q') {
+				return -1;
+			}
+			if (*(*(board+x-mod)+y+mod) == 'Q') {
+				return -1;
+			}
+		}
+		mod = mod + 1;
+	}
+	return y;
+}
+void placeQueen(char** board, int x, int y, int col) {
+	//Just place the queen
+	*(board+x) = calloc(col, sizeof(char));
+	*(*(board+x)+y) = 'Q';
+}
+
+int childPlanning(char** board, int row, int col) {
+	//Returns the number of child to fork
+	int nChild = 0;
+	for (int v = 0; v < col; v = v + 1) {
+		int vP = validPlace(board, row, v, col);
+		if (vP != -1) {
+			nChild = nChild + 1;
+		}
+	}
+	return nChild;
+}
+
+void printBoard(char** board, int row, int col) {
+	printf("Board display starts here\n");
+	for (int n = 0; n < row; n = n + 1) {
+		for (int i = 0; i < col; i = i + 1) {
+			if (*(*(board+n)+i) == 'Q') {
+			printf("Q");
+			}
+			else {
+				printf("X");
+			}
+		}
+		printf("\n");
+	}
+	printf("Board display ends here\n");
+}
+
+int child_process(char** board, int row, int col, int x, int y, int* pipefd) {
+	close(*(pipefd+0));
+	placeQueen(board, x, y, col);
+	//printBoard(board, x+1, col);
+	int n = 0;
+	if (x+1 < row) {
+		n = childPlanning(board, x+1, col);
+	}
+	if (n != 0) {
+		printf("P%d: %d possible moves at row #%d; creating %d child processes...\n", getpid(), n, x+1, n);
+		//Collect the y coordinates
+		//Fork the children
+		//printf("Forking %d childrens\n", n);
+		pid_t* pids = calloc(n, sizeof(pid_t));
+		if (pids == NULL) {
+			fprintf(stderr, "ERROR: fork() failed\n");
+			return EXIT_FAILURE;
+		}
+		int counter = 0;
+		for (int i = 0; i < col; i = i + 1) {
+			int yCoor = validPlace(board, x+1, i, col);
+			if (yCoor != -1) {
+				pid_t cp = fork();
+				if (cp == -1) {
+					fprintf(stderr, "ERROR: fork() failed\n");
+					return EXIT_FAILURE;
+				}
+				if (cp == 0) {
+					free(pids);
+					return child_process(board, row, col, x+1, yCoor, pipefd);
+				}
+				*(pids + counter) = cp;
+				counter = counter + 1;
+			}
+		}
+		int status;
+		pid_t cpid;
+		int child = 0;
+		while(child < n) {
+			cpid = waitpid(*(pids+child), &status, 0);
+			//cpid = waitpid(-1, &status, WNOHANG);
+			child = child+1;		
+			//printf("Child %d is done\n", cpid);
+			if (WIFSIGNALED(status)) {
+				printf("Child %d terminated abnormally\n", cpid);
+				return EXIT_FAILURE;
+			}
+			else if (WIFEXITED(status)) {
+				return EXIT_SUCCESS;		
+			}
+		}
+		return EXIT_SUCCESS;
+	} else {
+		//printf("nChild: %d\n", n);
+		if (x == col-1) {
+			char* nQ = calloc(2, sizeof(char));
+			sprintf(nQ,"%d",x+1);
+			write(*(pipefd+1), nQ ,1);
+			free(nQ);
+			printf("P%d: found a solution; notifying top-level parent\n", getpid());
+
+		}
+		else {
+			char* nQ = calloc(2, sizeof(char));
+			sprintf(nQ,"%d",x+1);
+			write(*(pipefd+1), nQ ,1);
+			free(nQ);
+			printf("P%d: dead end at row #%d; notifying top-level parent\n", getpid(), x+1);
+		}
+		return EXIT_SUCCESS;
+	}
+	//Managing return values of child processes
+	//printf("Wait for my children to be done\n");
+}
+
+//------------------------------ MAIN ----------------------------------
+int main (int argc, char** argv) {
+	
+	//Get the inputs from command line
+	//Check if there are enough arguments on the commandline
+	if (argc != 3) {
+		fprintf(stderr, "ERROR: Incorrect argument(s)\n");
+		fprintf(stderr, "USAGE: hw2.out <m> <n>");
+		return EXIT_FAILURE;
+	}
+	//Get the arguments from the commandline, check if they are greater than zero
+	int m = atoi(*(argv+1));
+	int n = atoi(*(argv+2));
+	if (m < 1 || n < 1) {
+		fprintf(stderr, "ERROR: Arguments must be at least 1\n");
+		fprintf(stderr, "USAGE: hw2.out <m> <n>, m >= 1 && n >= 1");
+		return EXIT_FAILURE;
+	}
+	if (m > n) {		//If n < m, swap them
+		int tmp = m;
+		m = n;
+		n = tmp;
+	}
+	// Create pipeline!
+	int* pipefd = calloc(2, sizeof(int));	//Allocate 2, for read and write
+	int rc = pipe(pipefd);
+	if (rc == -1) {
+		fprintf(stderr, "ERROR: pipe() failed\n");
+		return EXIT_FAILURE;
+	}
+	// Create an empty board in the parent process, it will be copied to the children
+	char** board = calloc(m, sizeof(char*));
+	//Format printing for parent process, then create children process
+	printf("P%d: solving the Abridged (m,n)-Queens problem for %dx%d board\n", getpid(), m, n);
+	printf("P%d: %d possible moves at row #0; creating %d child processes...\n", getpid(), n, n);
+	//Forking n children
+	pid_t* pids = calloc(n, sizeof(pid_t));
+	if (pids == NULL) {
+		fprintf(stderr, "ERROR: fork() failed\n");
+		return EXIT_FAILURE;
+	}
+	for (int i = 0; i < n; i = i + 1) {
+		pid_t cp = fork();
+		if (cp == -1) {
+			fprintf(stderr, "ERROR: fork() failed\n");
+			return EXIT_FAILURE;
+		}
+		if (cp == 0) {
+			free(pids);
+			return child_process(board, m, n, 0, i, pipefd);
+		}
+		*(pids + i) = cp;
+	}
+	//Parent process here
+	//Wait for the children to be done
+	//printf("Wait for my children to be done\n");
+	int status;
+	pid_t cpid;
+	while(n > 0) {
+		cpid = waitpid(-1, &status, 0);
+		n = n - 1;
+		//printf("Child %d is done\n", cpid);
+		if (WIFSIGNALED(status)) {
+			printf("Child %d terminated abnormally\n", cpid);
+		}
+		else if (WIFEXITED(status)) {
+		}
+	}
+	free(pids);
+	printf("P%d: search complete\n", getpid());
+	for (int i = 0; i < m; i = i + 1) {
+		free(*(board+i));
+	}
+	free(board);
+	return EXIT_SUCCESS;
+}

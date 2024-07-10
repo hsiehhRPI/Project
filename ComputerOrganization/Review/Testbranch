@@ -1,0 +1,443 @@
+// Code your testbench here
+// or browse Examples
+`timescale 1 ns/ 1ns
+module testbench;
+  //clock and reset signals
+	reg osc;
+	localparam period = 10;
+	
+	wire clk;
+	assign clk = osc;
+	//instantiate cpu module
+  CPU tb_cpu(clk);
+
+	initial osc = 1;  //init clk = 1 for positive-edge triggered
+  always begin  // Clock wave
+     #period  osc = ~osc;
+  end
+
+	initial begin 
+		$dumpfile("dump.vcd");
+		$dumpvars;
+	end
+
+endmodule
+
+// Code your design here
+`timescale 1ns/1ns
+module CPU(input clock);
+   parameter Add = 4'b0000,
+            Subt = 4'b0001, 
+            And = 4'b0010,
+            Or = 4'b0011,
+            Not = 4'b0100, 
+            Halt = 4'b0101, 
+            Load = 4'b0110, 
+            Store = 4'b0111, 
+            Clear = 4'b1000, 
+            Skip = 4'b1001, 
+            Jump = 4'b1010, 
+            Jal = 4'b1011, 
+            Return = 4'b1100;
+
+   //variables
+  //initial starting conditions
+   reg state = 0; //state program is in: fetch, decode, execute 
+   reg [31:0] PC = -4; //since our first step will be adding 4 to PC in the loop, start at -4 to effectively start at PC = 0
+   reg [31:0] IR;
+   reg [3:0] opcode = 0000;
+   reg [27:0] MAR;
+  wire [31:0] AC = 32'h00000000;
+   reg [31:0] MBR;
+
+
+   //stuff for memory
+   reg [27:0] mem_addy;
+   reg [31:0] write_val; // the value used to write to mem
+   wire [31:0] read_val; 
+   reg mem_RW;
+   reg mem_done;
+   
+   //make the Control_Unit module
+   //Control_Unit CU(PC, IR, Memory, state); //we need to make sure this only runs on every clock cycle as well, right?
+   //make memory
+  Main_Memory Mem( mem_addy, write_val, read_val, mem_RW, mem_done);
+
+   
+   //run program (loop: read line of code, put into IR, run on ALU, go to next line of code)
+   always @ (posedge clock) begin
+      case (state)
+         0: begin //fetch--read line of code and put into IR
+           if( opcode != Halt) begin
+              PC = PC + 4;
+            //IR = MEM[PC]
+              mem_addy = PC;
+            mem_RW = 1;
+            mem_done = 0;
+            #10; //wait a min to get the contents into the read value
+            mem_done = 1;
+            IR = read_val;
+            opcode = IR[31:28];
+            state = state + 1;
+           end
+         end
+         1: begin //decode--get opcode vs instruction
+            //finish all pre-ALU instructions here, now that we have the opcode
+            MAR = IR[27:0]; //MAR <- X
+            if (opcode == Add | opcode == Load | opcode == Subt | opcode == And | opcode == Or ) begin
+               //MBR <- M[MAR]
+               mem_addy = MAR;
+               mem_RW = 1; //read
+               mem_done = 0;//triggers the read in the memory module
+               #10;
+               mem_done = 1;//done reading
+               MBR = read_val;
+            end
+            else if (opcode == Jump)
+               PC = IR[27:0] -4;
+               
+            else if ( opcode == Skip) begin
+               //skip C examines AC based on condition C and skips if condition is met
+              if (MAR == 0 & AC < 0) begin
+                  PC = PC + 4;
+              end
+              else if (MAR == 2 & AC == 0) begin
+                  PC = PC + 4;
+              end
+              else if (MAR == 4 & AC > 0) begin
+                  PC = PC + 4;
+              end
+            end
+           else if( opcode == Jal) begin
+               //MBR <- PC + 
+               MBR = PC + 4;
+               //M[MAR] <- MBR #stores value in MBR to address of MAR
+               mem_addy = MAR;
+               write_val = MBR;
+               mem_RW = 0; // write
+               mem_done = 0; //triggers the write
+               #10; //let the write happen
+               mem_done = 1;
+            end
+            else if (opcode == Return) begin
+               //MBR <- M[MAR]
+               mem_addy = MAR;
+               mem_RW = 1; // read
+               mem_done = 0; //triggers the read
+               #10; //let the read happen
+               mem_done = 1;
+               MBR = read_val;
+               //MAR <- MBR
+               MAR = MBR[31:4];
+               //MBR <- M[MAR]  # fetches the value at the address into MBR
+               mem_addy = MAR;
+               mem_RW = 1; // read
+               mem_done = 0; //triggers the read
+               #10; //let the read happen
+               mem_done = 1;
+               MBR = read_val;
+               //PC <- MBR
+               PC = MBR;
+            end
+            //once our pre-alu instructions are done, advance to the next state
+            state = 2;
+         end
+         2: begin //execute--send to ALU
+            #10 // giving the ALU time to do its things
+            state = 3; 
+         end
+         
+         3: begin 
+            //all post-ALU instructions go here
+            if (opcode == Store) begin
+               //MBR <- AC
+                MBR = AC;
+               //M[MAR] <- MBR
+               mem_addy = MAR;
+               write_val = MBR;
+               mem_RW = 0;//write to mem
+               mem_done = 0;//trigger write
+               #10;// wait for write to finish
+               mem_done = 1;
+            end   
+            else if( opcode == Jal)
+               PC = AC;
+            state = 0; //for now, go back to read next line of code, we'll need something to end it
+         end 
+
+      endcase
+   end
+endmodule
+
+module Main_Memory( address, writevalue, readvalue, RW, done);
+  parameter mebibyte = 2**3,
+    memory_bytes = (256*mebibyte) - 1;
+  //inputs and outputs
+  input RW;// read = 1, write = 0
+  input [27:0] address;
+  input [31:0] writevalue; // a value to be  written to mem
+  output reg [31:0] readvalue; //a value to be read out to cpu
+  input done;
+
+  //Instantiate 4 chips of size 256Mi x 8
+   reg [7:0] Memory1[0:memory_bytes]; 
+   reg [7:0] Memory2[0:memory_bytes]; 
+   reg [7:0] Memory3[0:memory_bytes]; 
+   reg [7:0] Memory4[0:memory_bytes];
+
+  initial begin
+    //WE NEED TO INCLUDE A JUMP STATEMENT HERE TO JUMP TO THE FIRST LINE OF CODE,
+    //skipping over the data segment of the memory
+    Memory1[0] <= 8'b10100000;
+    Memory2[0] <= 8'b00000000;
+    Memory3[0] <= 8'b00000000;
+    Memory4[0] <= 8'b00001010; //Memory[10] is where our program starts
+
+  //Data segment:
+  //0
+    Memory1[1] <= 8'b00000000;
+    Memory2[1] <= 8'b00000000;
+    Memory3[1] <= 8'b00000000;
+    Memory4[1] <= 8'b00000000;
+  //1, f1, set to f1 term
+    Memory1[2] <= 8'b00000000; 
+    Memory2[2] <= 8'b00000000;
+    Memory3[2] <= 8'b00000000;
+    Memory4[2] <= 8'b00000001;
+  //2, initial starting index
+    Memory1[3] <= 8'b00000000; 
+    Memory2[3] <= 8'b00000000;
+    Memory3[3] <= 8'b00000000;
+    Memory4[3] <= 8'b00000010;
+  //11, the last term we need to compute(for checking whether the last term)
+    Memory1[4] <= 8'b00000000; 
+    Memory2[4] <= 8'b00000000;
+    Memory3[4] <= 8'b00000000;
+    Memory4[4] <= 8'b00001011;
+  //Needed Registers here
+  //t0, initialized to zero for now
+    Memory1[5] <= 8'b00000000; 
+    Memory2[5] <= 8'b00000000;
+    Memory3[5] <= 8'b00000000;
+    Memory4[5] <= 8'b00000000;
+  //t1, initialized to zero for now
+    Memory1[6] <= 8'b00000000; 
+    Memory2[6] <= 8'b00000000;
+    Memory3[6] <= 8'b00000000;
+    Memory4[6] <= 8'b00000000;
+  //t2, initialized to zero for now
+    Memory1[7] <= 8'b00000000; 
+    Memory2[7] <= 8'b00000000;
+    Memory3[7] <= 8'b00000000;
+    Memory4[7] <= 8'b00000000;
+  //t3, initialized to zero for now
+    Memory1[8] <= 8'b00000000; 
+    Memory2[8] <= 8'b00000000;
+    Memory3[8] <= 8'b00000000;
+    Memory4[8] <= 8'b00000000;
+  //t4, initialized to zero for now
+    Memory1[9] <= 8'b00000000; 
+    Memory2[9] <= 8'b00000000;
+    Memory3[9] <= 8'b00000000;
+    Memory4[9] <= 8'b00000000;
+
+//--------------------PROGRAM LINES START HERE---------------------------
+
+  //Hard coded instruction lines into the memory
+  //MAR = 0000 0001, AC=MBR=1    Load info from MAR into MBR then to AC
+    Memory1[10] <= 8'b01100000;
+    Memory2[10] <= 8'b00000000;
+    Memory3[10] <= 8'b00000000;
+    Memory4[10] <= 8'b00000100;
+  //MAR = address of t0, MBR=AC=1, t0 = 1 Put f1 term into t0
+    Memory1[11] <= 8'b01110000;
+    Memory2[11] <= 8'b00000000;
+    Memory3[11] <= 8'b00000000;
+    Memory4[11] <= 8'b00010000;
+  //MAR = address of t1, MBR=AC=1, t1 = 1 Put f2 term into t1
+    Memory1[12] <= 8'b01110000;
+    Memory2[12] <= 8'b00000000;
+    Memory3[12] <= 8'b00000000;
+    Memory4[12] <= 8'b00010100;
+  //Clear AC
+    Memory1[13] <= 8'b10000000;
+    Memory2[13] <= 8'b00000000;
+    Memory3[13] <= 8'b00000000;
+    Memory4[13] <= 8'b00000000;
+  //AC = 0, MAR = address of t2, MBR = AC = 0, t2 = 0 (This is the fibonacci term)
+    Memory1[14] <= 8'b01110000;
+    Memory2[14] <= 8'b00000000;
+    Memory3[14] <= 8'b00000000;
+    Memory4[14] <= 8'b00011000;
+  //MAR = address of 2 the number, AC=MBR=2, load 2 to AC
+    Memory1[15] <= 8'b01100000;
+    Memory2[15] <= 8'b00000000;
+    Memory3[15] <= 8'b00000000;
+    Memory4[15] <= 8'b00001000;
+  //MAR = address of t3, MBR=AC=2, t3 = 2, (store 2 into t3, for start index of loop)
+    Memory1[16] <= 8'b01110000;
+    Memory2[16] <= 8'b00000000;
+    Memory3[16] <= 8'b00000000;
+    Memory4[16] <= 8'b00011100;
+  //MAR = address of 11 the number, AC=MBR=11
+    Memory1[17] <= 8'b01100000;
+    Memory2[17] <= 8'b00000000;
+    Memory3[17] <= 8'b00000000;
+    Memory4[17] <= 8'b00001100;
+  //MAR = address of t4, MBR = AC = t4 = 11 (store 2 into t3, for end index of loop)
+    Memory1[18] <= 8'b01110000;
+    Memory2[18] <= 8'b00000000;
+    Memory3[18] <= 8'b00000000;
+    Memory4[18] <= 8'b00100000;
+  
+  //Loop:
+  //MAR = address of t0, AC=MBR=t0=1 (since f1 = f(n-2) = 1)
+    Memory1[19] <= 8'b01100000;
+    Memory2[19] <= 8'b00000000;
+    Memory3[19] <= 8'b00000000;
+    Memory4[19] <= 8'b00010000;
+  //MAR = address of t1, MBR=t1, AC = AC+MBR = t0+t1 = 2 (computes f3 term)
+    Memory1[20] <= 8'b00000000;
+    Memory2[20] <= 8'b00000000;
+    Memory3[20] <= 8'b00000000;
+    Memory4[20] <= 8'b00010100;
+  //Store the value into t2, which holds our computed fibonacci number
+    Memory1[21] <= 8'b01110000;
+    Memory2[21] <= 8'b00000000;
+    Memory3[21] <= 8'b00000000;
+    Memory4[21] <= 8'b00011000;
+  //MAR = address of t1, AC=MBR=t1
+    Memory1[22] <= 8'b01100000;
+    Memory2[22] <= 8'b00000000;
+    Memory3[22] <= 8'b00000000;
+    Memory4[22] <= 8'b00010100;
+  //MAR = address of t0, t0 = AC = MBR = t1
+  //(move content in t1 into t0, f(n-1) became the f(n-2) for the next calculation)
+    Memory1[23] <= 8'b01110000;
+    Memory2[23] <= 8'b00000000;
+    Memory3[23] <= 8'b00000000;
+    Memory4[23] <= 8'b00010000;
+  //MAR = address of t2, AC=MBR=t2
+    Memory1[24] <= 8'b01100000;
+    Memory2[24] <= 8'b00000000;
+    Memory3[24] <= 8'b00000000;
+    Memory4[24] <= 8'b00011000;
+  //MAR = address of t1, t1 = AC = MBR = t2
+  //(move content in t2 into t1, current fibonacci number became the f(n-1) for the next calculation)
+    Memory1[25] <= 8'b01110000;
+    Memory2[25] <= 8'b00000000;
+    Memory3[25] <= 8'b00000000;
+    Memory4[25] <= 8'b00010100;
+  //MAR = address of t3, AC=MBR=t3
+    Memory1[26] <= 8'b01100000;
+    Memory2[26] <= 8'b00000000;
+    Memory3[26] <= 8'b00000000;
+    Memory4[26] <= 8'b00011100;
+  //MAR = address of 1(the number), MBR=1, AC = AC+1 = t3+1(calculate incrementation)
+    Memory1[27] <= 8'b00000000;
+    Memory2[27] <= 8'b00000000;
+    Memory3[27] <= 8'b00000000;
+    Memory4[27] <= 8'b00000100;
+  //MAR = address of t3, MBR = AC = t3 = t3+1 (update the index with incremented index)
+    Memory1[28] <= 8'b01110000;
+    Memory2[28] <= 8'b00000000;
+    Memory3[28] <= 8'b00000000;
+    Memory4[28] <= 8'b00011100;
+  //MAR = address of t3, AC=MBR=t3
+    Memory1[29] <= 8'b01100000;
+    Memory2[29] <= 8'b00000000;
+    Memory3[29] <= 8'b00000000;
+    Memory4[29] <= 8'b00011100;
+  //MAR = address of t4, MBR = t4. AC = AC-MBR = t3-t4 (to check whether t3 = t4)
+    Memory1[30] <= 8'b00010000;
+    Memory2[30] <= 8'b00000000;
+    Memory3[30] <= 8'b00000000;
+    Memory4[30] <= 8'b00100000;
+  //AC = t3-t4 (if t3 = t4 = 11, skip to halt), skip next line of code if AC = 0 (command: skip 2)
+    Memory1[31] <= 8'b10010000;
+    Memory2[31] <= 8'b00000000;
+    Memory3[31] <= 8'b00000000;
+    Memory4[31] <= 8'b00000010;
+    //Jump to top of loop (address 19 in Memory)
+    Memory1[32] <= 8'b10100000;
+    Memory2[32] <= 8'b00000000;
+    Memory3[32] <= 8'b00000000;
+    Memory4[32] <= 8'b00010011;
+  //AC=MBR=t2(f11), use $display to check testbench
+    Memory1[33] <= 8'b01100000;
+    Memory2[33] <= 8'b00000000;
+    Memory3[33] <= 8'b00000000;
+    Memory4[33] <= 8'b00110000;
+  //Stop PC from incrementing, stops program from continue 
+    Memory1[34] <= 8'b01010000;
+    Memory2[34] <= 8'b00000000;
+    Memory3[34] <= 8'b00000000;
+    Memory4[34] <= 8'b00000000;
+  end
+
+  always @(negedge done) begin //when the done is set to 0, we do a read/write
+      if(RW == 1'b1) // read
+           begin 
+             readvalue[31:24] <= Memory1[address];
+             readvalue[23:16] <= Memory2[address];
+             readvalue[15:8] <= Memory3[address];
+             readvalue[7:0] <= Memory4[address];
+           end
+      else if (RW == 1'b0) // write
+           begin 
+            //Separate MBR's content into 4 pieces to fit the architecture and write to correct memory areas of MAR
+             Memory1[address] <= writevalue[31:24];
+             Memory2[address] <= writevalue[23:16];
+             Memory3[address] <= writevalue[15:8];
+             Memory4[address] <= writevalue[7:0];
+           end
+  end
+endmodule
+
+module ALU(opcode, MBR, addr, AC, state);
+    //defining the opcodes
+    parameter Add = 4'b0000,
+            Subt = 4'b0001, 
+            And = 4'b0010,
+            Or = 4'b0011,
+            Not = 4'b0100, 
+            Halt = 4'b0101, 
+            Load = 4'b0110, 
+            Store = 4'b0111, 
+            Clear = 4'b1000, 
+            Skip = 4'b1001, 
+            Jump = 4'b1010, 
+            Jal = 4'b1011, 
+            Return = 4'b1100;
+    
+    input [2:0] state;
+    input [3:0] opcode;
+    input [31:0] MBR;
+  output reg [31:0] AC = 0; //the accumulator 
+    input [27:0] addr;
+    reg [31:0] negMBR;// the 2's complement notation of MBR
+
+    always @ (state) begin //updated to only go once every clock cycle
+        if(state == 2) begin
+            negMBR = ~MBR + 1;
+            case (opcode)
+                Load:
+                   AC =  MBR; 
+                Clear:
+                    AC = 0;
+                And:
+                    AC = AC & MBR;
+              	Or:
+                  AC = AC | MBR;
+                Not:
+                    AC = ~AC;
+                Jal:
+                    AC= addr + 1;
+                Add:
+                    AC = AC + MBR;
+                Subt:
+                    AC = AC + negMBR;         
+            endcase
+        end// end if block
+    end// end always
+endmodule

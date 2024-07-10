@@ -1,0 +1,42 @@
+-Each engine weighs 150 tons and has 3000hp
+- Types of freight cars(weigh varies):
+	- Unmarked cars are passenger cars
+	- 
+- Other cars weigh 50 tons
+- Can have multiple engines(can be positioned anywhere)
+- DO NOT edit traincar.h
+- 
+Tasks:
+------Basics------
+- Calculaute maximum speed on 2% incline
+	- Formula given
+- Calculate average distance to dining
+	- Smaller number = better
+- Calculate average distance from sleeping car to engine
+	- Bigger number = better
+- Represent infinite statisitcs using negative val
+
+------Task1------
+- Write a function called std::vector<Trains>ShipeFright(4 arg)
+	- First two are TrainCar pointers: (collection of engine, collection fo freight cars)
+	- Third: minimum speed
+	- Fourth: max num of cars allowed per train
+- MUST ACHIEVE MINIMUM SPEED AND MAX CAR REQUIREMENTS
+
+------Task2------
+- Function: Separate()
+	- Speed should be nearly equal
+	- Minimize cost of link/unlink
+- Draw diagrams(MUST, bring the drawing to lab7, it is one of the checkpoints)
+- Code should NOT create New Nodes
+- NO editing of types of train cars
+- There is a helper function that counts link and unlinks
+
+- Splitting one train into multiple small train
+- ASSUMPTION: 
+	- Exactly two engines for the big train
+	- Cost 1 money unit to: unlink/link/drag/shift
+
+------Extra credit------
+SeparateComfort()
+

@@ -1,0 +1,7 @@
+The total time out in this season is: 1 hours and 35 minutes
+Team Name    Penalty Time
+Rensselaer         0h 13m
+Yale               0h  4m
+Cornell            0h 20m
+Clarkson           0h 18m
+The least likely penalty is: Contact_to_the_Head, which happened 1 time(s).
